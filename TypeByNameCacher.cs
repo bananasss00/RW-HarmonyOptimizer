@@ -10,9 +10,7 @@ namespace OptimizerHarmony
     [HarmonyPatch(typeof(AccessTools), nameof(AccessTools.TypeByName))]
     class HarmonyTypeByNameCacher
     {
-        static readonly Dictionary<string, Type> TypeByString_FullName = new Dictionary<string, Type>();
-        static readonly Dictionary<string, Type> TypeByString_Name = new Dictionary<string, Type>();
-        static readonly Dictionary<string, Type> TypeByString_New = new Dictionary<string, Type>();
+        static readonly Dictionary<string, Type> TypeByString = new Dictionary<string, Type>();
 
         private static bool _initialized = false;
 
@@ -25,12 +23,12 @@ namespace OptimizerHarmony
             foreach (var type in types)
             {
                 var fullName = type.FullName;
-                if (!TypeByString_FullName.ContainsKey(fullName))
-                    TypeByString_FullName.Add(fullName, type);
+                if (!TypeByString.ContainsKey(fullName))
+                    TypeByString.Add(fullName, type);
 
                 var name = type.Name;
-                if (!TypeByString_Name.ContainsKey(name))
-                    TypeByString_Name.Add(name, type);
+                if (!TypeByString.ContainsKey(name))
+                    TypeByString.Add(name, type);
             }
             Log.Warning($"[OptimizerHarmony:Initialize] Elapsed time: {sw.ElapsedTicks.TicksToMs(4)}ms. Allocated memory: {(int)((GC.GetTotalMemory(false) - mem) / 1024)}kb");
         }
@@ -44,17 +42,15 @@ namespace OptimizerHarmony
                 _initialized = true;
             }
 
-            if (!TypeByString_FullName.TryGetValue(name, out __result))
+            if (!TypeByString.TryGetValue(name, out __result))
             {
-                if (!TypeByString_Name.TryGetValue(name, out __result))
+                __result = TypeByName(name);
+                if (__result != null)
                 {
-                    if (!TypeByString_New.TryGetValue(name, out __result)) // try call original
-                    {
-                        __result = TypeByName(name);
-                        if (__result != null) TypeByString_New.Add(name, __result);
-                    }
-                    Log.Warning($"[OptimizerHarmony:TypeByName] can't find type {name}");
+                    TypeByString.Add(name, __result);
+                    Log.Warning($"[OptimizerHarmony:TypeByName] can't find type {name}. But from original method found!");
                 }
+                // else Log.Error($"[OptimizerHarmony:TypeByName] can't find type {name}!");
             }
 
             if (__result is null && Harmony.DEBUG)
@@ -62,7 +58,7 @@ namespace OptimizerHarmony
             return false;
         }
 
-        static Type TypeByName(string name)
+        public static Type TypeByName(string name)
         {
             var type = Type.GetType(name, false);
             var assemblies = AppDomain.CurrentDomain.GetAssemblies().Where(a => a.FullName.StartsWith("Microsoft.VisualStudio") is false);
