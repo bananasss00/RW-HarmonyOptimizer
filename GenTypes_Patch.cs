@@ -1,48 +1,87 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using HarmonyLib;
+using UnityEngine;
 using Verse;
 
 namespace OptimizerHarmony
 {
-    [StaticConstructorOnStartup]
-    public class GenTypesPatch
+	/// <summary>
+	/// Access to original not patched GenTypes methods
+	/// </summary>
+    [HarmonyPatch(typeof(GenTypes))]
+    public class GenTypes_Original
     {
-        static readonly List<Assembly> AllActiveAssembliesCache;
-        static readonly List<Type> AllTypesCache;
+        [HarmonyReversePatch]
+        [HarmonyPatch(nameof(GenTypes.AllTypes), MethodType.Getter)]
+        public static IEnumerable<Type> AllTypes() => throw new NotImplementedException("It's a stub");
+
+        [HarmonyReversePatch]
+        [HarmonyPatch(nameof(GenTypes.AllActiveAssemblies), MethodType.Getter)]
+        public static IEnumerable<Assembly> AllActiveAssemblies() => throw new NotImplementedException("It's a stub");
+
+        [HarmonyReversePatch]
+        [HarmonyPatch(nameof(GenTypes.AllSubclasses))]
+        public static IEnumerable<Type> AllSubclasses(Type baseType) => throw new NotImplementedException("It's a stub");
+
+        [HarmonyReversePatch]
+        [HarmonyPatch(nameof(GenTypes.AllSubclasses))]
+        public static IEnumerable<Type> AllSubclassesNonAbstract(Type baseType) => throw new NotImplementedException("It's a stub");
+
+        [HarmonyReversePatch]
+        [HarmonyPatch(nameof(GenTypes.AllLeafSubclasses))]
+        public static IEnumerable<Type> AllLeafSubclasses(Type baseType) => throw new NotImplementedException("It's a stub");
+
+        [HarmonyReversePatch]
+        [HarmonyPatch(nameof(GenTypes.InstantiableDescendantsAndSelf))]
+        public static IEnumerable<Type> InstantiableDescendantsAndSelf(Type baseType) => throw new NotImplementedException("It's a stub");
+    }
+
+    [HarmonyPatch(typeof(GenTypes))]
+    public class GenTypes_Patch
+    {
+        static List<Assembly> AllActiveAssembliesCache;
+        static List<Type> AllTypesCache;
         static readonly Dictionary<Type, List<Type>> AllSubclassesCache = new Dictionary<Type, List<Type>>();
         static readonly Dictionary<Type, List<Type>> AllSubclassesNonAbstractCache = new Dictionary<Type, List<Type>>();
         static readonly Dictionary<Type, List<Type>> AllLeafSubclassesCache = new Dictionary<Type, List<Type>>();
         static readonly Dictionary<Type, List<Type>> InstantiableDescendantsAndSelfCache = new Dictionary<Type, List<Type>>();
 
-        static GenTypesPatch()
+        public static void ResetCaches()
         {
-            var h = Main.H;
-            AllActiveAssembliesCache = GenTypes.AllActiveAssemblies.ToList();
-            h.Patch(AccessTools.PropertyGetter(typeof(GenTypes), nameof(GenTypes.AllActiveAssemblies)), prefix: new HarmonyMethod(AccessTools.Method(typeof(GenTypesPatch), nameof(AllActiveAssemblies))));
-
-            AllTypesCache = GenTypes.AllTypes.ToList();
-            h.Patch(AccessTools.PropertyGetter(typeof(GenTypes), nameof(GenTypes.AllTypes)), prefix: new HarmonyMethod(AccessTools.Method(typeof(GenTypesPatch), nameof(AllTypes))));
-
-            h.Patch(AccessTools.Method(typeof(GenTypes), nameof(GenTypes.AllSubclasses)), prefix: new HarmonyMethod(AccessTools.Method(typeof(GenTypesPatch), nameof(AllSubclasses))));
-            h.Patch(AccessTools.Method(typeof(GenTypes), nameof(GenTypes.AllSubclassesNonAbstract)), prefix: new HarmonyMethod(AccessTools.Method(typeof(GenTypesPatch), nameof(AllSubclassesNonAbstract))));
-            h.Patch(AccessTools.Method(typeof(GenTypes), nameof(GenTypes.AllLeafSubclasses)), prefix: new HarmonyMethod(AccessTools.Method(typeof(GenTypesPatch), nameof(AllLeafSubclasses))));
-            h.Patch(AccessTools.Method(typeof(GenTypes), nameof(GenTypes.InstantiableDescendantsAndSelf)), prefix: new HarmonyMethod(AccessTools.Method(typeof(GenTypesPatch), nameof(InstantiableDescendantsAndSelf))));
+            AllActiveAssembliesCache = null;
+            AllTypesCache = null;
+            AllSubclassesCache.Clear();
+            AllSubclassesNonAbstractCache.Clear();
+            AllLeafSubclassesCache.Clear();
+            InstantiableDescendantsAndSelfCache.Clear();
         }
 
-        static bool AllTypes(ref IEnumerable<Type> __result) {
-            __result = AllTypesCache;
+		[HarmonyPatch(nameof(GenTypes.AllTypes), MethodType.Getter)]
+		[HarmonyPrefix]
+        static bool AllTypes(ref IEnumerable<Type> __result)
+        {
+            StartStopwatch();
+            __result = AllTypesCache ?? (AllTypesCache = GenTypes_Original.AllTypes().ToList());
+			StopStopwatch("AllTypes", () => _ = AllTypesCache = GenTypes_Original.AllTypes().ToList());
             return false;
         }
 
+        [HarmonyPatch(nameof(GenTypes.AllActiveAssemblies), MethodType.Getter)]
+        [HarmonyPrefix]
         static bool AllActiveAssemblies(ref IEnumerable<Assembly> __result)
 		{
-            __result = AllActiveAssembliesCache;
+            StartStopwatch();
+            __result = AllActiveAssembliesCache ?? (AllActiveAssembliesCache = GenTypes_Original.AllActiveAssemblies().ToList());
+            StopStopwatch("AllActiveAssemblies", () => _ = AllActiveAssembliesCache = GenTypes_Original.AllActiveAssemblies().ToList());
             return false;
 		}
 
+        [HarmonyPatch(nameof(GenTypes.AllSubclasses))]
+        [HarmonyPrefix]
         static bool AllSubclasses(Type baseType, ref IEnumerable<Type> __result)
         {
             if (!AllSubclassesCache.TryGetValue(baseType, out var cache)) {
@@ -53,23 +92,20 @@ namespace OptimizerHarmony
             return false;
         }
 
-  //       public static IEnumerable<Type> AllTypesWithAttribute<TAttr>() where TAttr : Attribute
-		// {
-		// 	return Enumerable.Where<Type>(GenTypes.AllTypes, (Type x) => x.HasAttribute<TAttr>());
-		// }
-
-		
-
+        [HarmonyPatch(nameof(GenTypes.AllSubclassesNonAbstract))]
+        [HarmonyPrefix]
         static bool AllSubclassesNonAbstract(Type baseType, ref IEnumerable<Type> __result)
-		{
+        {
             if (!AllSubclassesNonAbstractCache.TryGetValue(baseType, out var cache)) {
                 cache = GenTypes.AllTypes.Where(x => x.IsSubclassOf(baseType) && !x.IsAbstract).ToList();
                 AllSubclassesNonAbstractCache.Add(baseType, cache);
             }
             __result = cache; 
             return false;
-		}
+        }
 
+        [HarmonyPatch(nameof(GenTypes.AllLeafSubclasses))]
+        [HarmonyPrefix]
         static bool AllLeafSubclasses(Type baseType, ref IEnumerable<Type> __result)
         {
             if (!AllLeafSubclassesCache.TryGetValue(baseType, out var cache)) {
@@ -80,6 +116,8 @@ namespace OptimizerHarmony
             return false;
         }
 
+        [HarmonyPatch(nameof(GenTypes.InstantiableDescendantsAndSelf))]
+        [HarmonyPrefix]
         static bool InstantiableDescendantsAndSelf(Type baseType, ref IEnumerable<Type> __result) {
             IEnumerable<Type> InstantiableDescendantsAndSelf(Type t) {
                 if (!t.IsAbstract)
@@ -96,6 +134,46 @@ namespace OptimizerHarmony
             __result = cache; 
             return false;
         }
+
+        #region PERFOMANCE CHECK
+        private static List<(string, double, double)> _impacts = new List<(string, double, double)>();
+        private static Stopwatch _sw;
+
+        [Conditional("DEBUG")]
+        static void StartStopwatch()
+        {
+            _sw = Stopwatch.StartNew();
+        }
+
+        [Conditional("DEBUG")]
+        static void StopStopwatch(string typeName, Action original)
+        {
+            var dictImpact = _sw.Elapsed.TotalMilliseconds;
+
+            _sw = Stopwatch.StartNew();
+            original();
+            var originalImpact = _sw.Elapsed.TotalMilliseconds;
+
+            _impacts.Add((typeName, dictImpact, originalImpact));
+        }
+
+        [Conditional("DEBUG")]
+        public static void DoSettingsWindowContents(Listing_Standard l)
+        {
+            var groups = _impacts.GroupBy(x => x.Item1).ToList();
+            l.Label("=== GenTypes ===");
+            foreach (var @group in groups)
+            {
+                l.Label($"{@group.Key} from dict: {@group.Sum(x => x.Item2)}ms");
+                l.Label($"{@group.Key} from original: {@group.Sum(x => x.Item3)}ms");
+            }
+        }
+        #endregion
+
+		//public static IEnumerable<Type> AllTypesWithAttribute<TAttr>() where TAttr : Attribute
+		//{
+		//	return Enumerable.Where<Type>(GenTypes.AllTypes, (Type x) => x.HasAttribute<TAttr>());
+		//}
 
 		// public static Type GetTypeInAnyAssembly(string typeName, string namespaceIfAmbiguous = null)
 		// {
